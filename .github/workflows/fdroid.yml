@@ -16,6 +16,10 @@ jobs:
   update-fdroid-version-file:
     name: Publish RustDesk version file for F-Droid updater
     runs-on: ubuntu-latest
+    # The final step creates/updates the `fdroid-version` release. This repository's default
+    # workflow permission is read-only, so without this the publish step fails with 403.
+    permissions:
+      contents: write
     steps:
       - name: Generate RustDesk version file
         run: |
