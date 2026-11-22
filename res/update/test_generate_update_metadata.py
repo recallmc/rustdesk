@@ -265,6 +265,35 @@ class GenerateUpdateMetadataTest(unittest.TestCase):
                 )
                 self.assertNotEqual(result.returncode, 0)
 
+    def test_check_key_tolerates_surrounding_whitespace(self):
+        source = self.rust_source()
+
+        # Values pasted from a file or a shell tend to carry a trailing newline. It must be
+        # stripped (with a note), not rejected as invalid base64.
+        result = self.run_script(
+            "check-key",
+            "--rust-source",
+            str(source),
+            seed=self.seed + "\n",
+            public_key=self.public_key + "\n",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("trimmed surrounding whitespace", result.stderr)
+
+    def test_check_key_explains_the_byte_array_mistake(self):
+        # The byte array belongs in src/update_metadata.rs; the environment variable must hold
+        # the base64 form. Pasting the array is easy to do, so say what is wrong.
+        byte_array = ", ".join(str(byte) for byte in base64.b64decode(self.public_key))
+        result = self.run_script(
+            "check-key",
+            "--rust-source",
+            str(self.rust_source()),
+            seed=self.seed,
+            public_key=byte_array,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("comma-separated byte array", result.stderr)
+
     def test_check_key_rejects_invalid_public_key(self):
         source = self.rust_source()
         invalid_keys = [
