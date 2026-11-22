@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../biometric_gate.dart';
-import '../common.dart';
+import '../../common.dart';
 import '../credential_store.dart';
 
 /// Configure the saved credential of one peer from the peer list.

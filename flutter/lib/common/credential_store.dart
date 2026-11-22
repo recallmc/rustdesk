@@ -1,8 +1,7 @@
 import 'dart:convert';
 import 'dart:async';
 
-import 'package:flutter_hbb/generated_bridge.dart'
-    if (dart.library.html) 'package:flutter_hbb/web/bridge.dart';
+import '../models/platform_model.dart';
 import 'package:get/get.dart';
 
 import '../models/peer_credential.dart';
