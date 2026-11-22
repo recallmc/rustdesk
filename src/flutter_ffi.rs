@@ -292,6 +292,56 @@ pub fn session_send2fa(session_id: SessionID, code: String, trust_this_device: b
     }
 }
 
+/// Stores the login credential of one peer. Secrets are encrypted before they reach the disk.
+pub fn peer_credential_save(
+    id: String,
+    access_secret: String,
+    os_username: String,
+    os_secret: String,
+    label: String,
+    biometric_required: bool,
+) -> bool {
+    crate::credential_store::save_default(
+        &id,
+        &access_secret,
+        &os_username,
+        &os_secret,
+        &label,
+        biometric_required,
+    )
+}
+
+/// JSON of the saved credential, secrets decrypted; empty when the peer has none.
+pub fn peer_credential_load(id: String) -> String {
+    crate::credential_store::load_json_default(&id)
+}
+
+pub fn peer_credential_delete(id: String) -> bool {
+    crate::credential_store::delete_default(&id)
+}
+
+pub fn peer_credential_has(id: String) -> bool {
+    crate::credential_store::has_default(&id)
+}
+
+pub fn peer_credential_ids() -> Vec<String> {
+    crate::credential_store::ids_default()
+}
+
+/// `state` is one of `active`, `stale`, `disabled`.
+pub fn peer_credential_set_state(id: String, state: String) -> bool {
+    crate::credential_store::set_state_default(&id, &state)
+}
+
+pub fn peer_credential_touch(id: String) -> bool {
+    crate::credential_store::touch_default(&id)
+}
+
+/// Marks a rejected credential and returns the new failure count.
+pub fn peer_credential_record_failure(id: String) -> u32 {
+    crate::credential_store::record_failure_default(&id)
+}
+
 pub fn session_get_enable_trusted_devices(session_id: SessionID) -> SyncReturn<bool> {
     let v = if let Some(session) = sessions::get_session_by_session_id(&session_id) {
         session.get_enable_trusted_devices()

@@ -39,6 +39,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:vector_math/vector_math.dart' show Vector2;
 
 import '../common.dart';
+import '../common/biometric_gate.dart';
+import '../common/credential_store.dart';
 import '../utils/image.dart' as img;
 import '../common/widgets/dialog.dart';
 import 'input_model.dart';
@@ -864,6 +866,32 @@ class FfiModel with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Submits a previously saved credential for this peer, gated by a local biometric check.
+  ///
+  /// Returns false when the caller should fall back to the ordinary password dialog. Secrets are
+  /// never logged and `remember` stays false so Rust does not write the password back to the
+  /// plaintext `PeerConfig` TOML.
+  Future<bool> _trySavedCredentialLogin(
+      SessionID sessionId, String peerId) async {
+    final store = CredentialStore.instance;
+    final credential = await store.read(peerId);
+    if (credential == null || !credential.canAutoSubmit) return false;
+
+    if (credential.biometricRequired) {
+      final outcome = await BiometricGate.instance
+          .verify(reason: 'Confirm it is you to sign in to $peerId');
+      if (outcome == BiometricOutcome.failed) {
+        await store.recordFailure(peerId);
+      }
+      if (outcome != BiometricOutcome.ok) return false;
+    }
+
+    gFFI.login(credential.osUsername, credential.osSecret, sessionId,
+        credential.accessSecret, false);
+    await store.touch(peerId);
+    return true;
+  }
+
   cancelMsgBox(Map<String, dynamic> evt, SessionID sessionId) {
     if (parent.target == null) return;
     final dialogManager = parent.target!.dialogManager;
@@ -885,7 +913,8 @@ class FfiModel with ChangeNotifier {
   }
 
   /// Handle the message box event based on [evt] and [id].
-  handleMsgBox(Map<String, dynamic> evt, SessionID sessionId, String peerId) {
+  Future<void> handleMsgBox(
+      Map<String, dynamic> evt, SessionID sessionId, String peerId) async {
     if (parent.target == null) return;
     final dialogManager = parent.target!.dialogManager;
     final type = evt['type'];
@@ -915,11 +944,17 @@ class FfiModel with ChangeNotifier {
     }
 
     if (type == 're-input-password') {
+      // The remote rejected the password we sent: mark the saved credential stale so the next
+      // tap does not keep submitting a known-wrong secret. Never auto-retry in a loop.
+      await CredentialStore.instance.markStale(peerId);
       wrongPasswordDialog(sessionId, dialogManager, type, title, text);
     } else if (type == 'input-2fa') {
       enter2FaDialog(sessionId, dialogManager);
     } else if (type == 'input-password') {
-      enterPasswordDialog(sessionId, dialogManager);
+      // Saved credential + local fingerprint gate, falling back to the original password dialog.
+      if (!await _trySavedCredentialLogin(sessionId, peerId)) {
+        enterPasswordDialog(sessionId, dialogManager);
+      }
     } else if (type == 'terminal-admin-login' ||
         type == 'terminal-admin-login-request-approval') {
       enterUserLoginDialog(sessionId, dialogManager, 'terminal-admin-login-tip',

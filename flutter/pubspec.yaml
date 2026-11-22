@@ -32,6 +32,10 @@ dependencies:
   provider: ^6.0.5
   tuple: ^2.0.0
   wakelock_plus: ^1.1.3
+  # Fingerprint / face confirmation before a saved peer credential is submitted.
+  # Credentials themselves are stored encrypted by the Rust side (src/credential_store.rs),
+  # so no secure-storage plugin is needed and Linux builds stay dependency-free.
+  local_auth: ^2.3.0
   #firebase_analytics: ^9.1.5
   package_info_plus: ^4.2.0
   url_launcher: ^6.3.1

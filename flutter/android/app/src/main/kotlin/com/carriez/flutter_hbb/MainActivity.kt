@@ -36,6 +36,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import com.hjq.permissions.XXPermissions
 import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.android.FlutterView
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -45,7 +46,8 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 
 
-class MainActivity : FlutterActivity() {
+// local_auth needs a FragmentActivity; FlutterActivity.FLUTTER_VIEW_ID is still used below.
+class MainActivity : FlutterFragmentActivity() {
     companion object {
         var flutterMethodChannel: MethodChannel? = null
         private var _rdClipboardManager: RdClipboardManager? = null
