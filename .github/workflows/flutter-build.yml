@@ -1238,21 +1238,16 @@ jobs:
           TAG_NAME: ${{ env.TAG_NAME }}
         run: |
           set -euo pipefail
-          releases="$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases?per_page=100")"
-          release_id="$(
-            jq -r --arg tag "$TAG_NAME" '
-              [.[][] | select(.tag_name == $tag)] |
-              if length == 0 then ""
-              elif length == 1 then .[0].id
-              else error("multiple releases found for tag")
-              end
-            ' <<<"$releases"
-          )"
+          # Ask the API for single fields instead of slurping whole pages: the shape of
+          # `gh api --paginate --slurp` output differs between gh versions (flat array vs array
+          # of pages), and the previous `.[][]` iteration aborted the step with jq exit code 5
+          # whenever the tag already had a release -- exactly the case this guard exists for.
+          release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG_NAME}" --jq '.id' 2>/dev/null || true)"
           if [ -z "$release_id" ]; then
             exit 0
           fi
-          assets="$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?per_page=100")"
-          if jq -e 'any(.[][]; .name == "rustdesk-update.json")' <<<"$assets" >/dev/null; then
+          names="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?per_page=100" --jq '.[].name' || true)"
+          if grep -qx 'rustdesk-update.json' <<<"$names"; then
             echo "::error::Signed update metadata is already published for ${TAG_NAME}; use a new release tag for corrected artifacts."
             exit 1
           fi
