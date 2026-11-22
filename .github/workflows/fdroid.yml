@@ -29,7 +29,22 @@ jobs:
           else
             # Query this fork instead of the upstream repository, otherwise the published version
             # file advertises the official build and points F-Droid clients back upstream.
-            UPSTREAM_VERNAME="$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest" | jq -r .tag_name | sed 's/^v//')"
+            #
+            # `/releases/latest` is not usable here: it skips releases flagged prerelease, and every
+            # release of this project is published that way, so it answers 404. List the releases
+            # instead and keep the highest stable x.y.z tag.
+            UPSTREAM_VERNAME="$(
+              curl -fsSL "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+                | jq -r '.[] | select(.draft | not) | .tag_name' \
+                | sed 's/^v//' \
+                | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+                | sort -t. -k1,1n -k2,2n -k3,3n \
+                | tail -n 1
+            )"
+            if [ -z "$UPSTREAM_VERNAME" ]; then
+              echo "no stable release found in ${GITHUB_REPOSITORY}" >&2
+              exit 1
+            fi
           fi
           UPSTREAM_VERCODE="$(echo "$UPSTREAM_VERNAME" | tr '.' ' ' | tr '-' ' ' | while read -r MAJOR MINOR PATCH REV; do [ -z "$MAJOR" ] && MAJOR=0; [ -z "$MINOR" ] && MINOR=0; [ -z "$PATCH" ] && PATCH=0; [ -z "$REV" ] && REV=0; echo "$(( 1000000 * $MAJOR + 10000 * $MINOR + 100 * $PATCH + $REV ))"; done)"
           echo "versionName=$UPSTREAM_VERNAME"  > rustdesk-version.txt
