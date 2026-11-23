@@ -188,6 +188,10 @@ const String kOptionTrustedDeviceExpiration = "trusted-device-expiration-days";
 const String kOptionShowVirtualMouse = "show-virtual-mouse";
 const String kOptionVirtualMouseScale = "virtual-mouse-scale";
 const String kOptionShowVirtualJoystick = "show-virtual-joystick";
+/// Source repository these builds come from. Every "about" surface must use this instead of the
+/// upstream project, so a fork's users are never sent to the wrong site.
+const String kProjectHomeUrl = "https://github.com/recallmc/rustdesk";
+const String kProjectHomeLabel = "github.com/recallmc/rustdesk";
 /// Reuse the phone's enrolled fingerprint authenticator to sign in to a remote computer,
 /// mirroring the "fingerprint payment" pattern: nothing is sent until the sensor confirms.
 const String kOptionFingerprintOsLogin = "fingerprint-os-login";
