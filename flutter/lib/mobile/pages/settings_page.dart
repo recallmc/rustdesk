@@ -12,6 +12,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
 import '../../common.dart';
+import '../../common/biometric_gate.dart';
 import '../../common/widgets/dialog.dart';
 import '../../common/widgets/login.dart';
 import '../../consts.dart';
@@ -108,6 +109,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   var _isUsingPublicServer = false;
   var _allowAskForNoteAtEndOfConnection = false;
   var _preventSleepWhileConnected = true;
+  var _fingerprintOsLogin = false;
 
   _SettingsState() {
     _enableAbr = option2bool(
@@ -123,6 +125,8 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     _enableHardwareCodec = option2bool(kOptionEnableHwcodec,
         bind.mainGetOptionSync(key: kOptionEnableHwcodec));
     _allowWebSocket = mainGetBoolOptionSync(kOptionAllowWebSocket);
+    _fingerprintOsLogin =
+        mainGetBoolOptionSync(kOptionFingerprintOsLogin);
     _allowInsecureTlsFallback =
         mainGetBoolOptionSync(kOptionAllowInsecureTLSFallback);
     _disableUdp = bind.mainGetOptionSync(key: kOptionDisableUdp) == 'Y';
@@ -390,6 +394,41 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
                 return _ManageTrustedDevices();
               }));
             })
+    ];
+    final List<AbstractSettingsTile> fingerprintOsLoginTiles = [
+      SettingsTile.switchTile(
+        key: ValueKey('fingerprint-os-login-$_fingerprintOsLogin'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(translate('Use phone fingerprint to sign in to computers')),
+            Text(
+              '* ${translate('fingerprint-os-login-tip')}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        initialValue: _fingerprintOsLogin,
+        onToggle: (v) async {
+          if (v) {
+            // Enabling requires a successful check with the phone's own authenticator, so it
+            // cannot be switched on by someone who merely holds the unlocked device.
+            final outcome = await BiometricGate.instance.verify(
+                reason: translate(
+                    'Confirm your fingerprint to enable fingerprint sign in'));
+            if (outcome != BiometricOutcome.ok) {
+              showToast(outcome == BiometricOutcome.unavailable
+                  ? translate('No fingerprint is set up on this device')
+                  : translate('Fingerprint verification failed'));
+              if (mounted) setState(() {});
+              return;
+            }
+          }
+          await mainSetBoolOption(kOptionFingerprintOsLogin, v);
+          if (!mounted) return;
+          setState(() => _fingerprintOsLogin = v);
+        },
+      ),
     ];
     final List<AbstractSettingsTile> shareScreenTiles = [
       SettingsTile.switchTile(
@@ -1039,6 +1078,14 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
             !outgoingOnly &&
             !hideSecuritySettings)
           SettingsSection(title: Text('2FA'), tiles: tfaTiles),
+        if (isAndroid &&
+            !disabledSettings &&
+            !outgoingOnly &&
+            !hideSecuritySettings)
+          SettingsSection(
+            title: Text(translate('Security')),
+            tiles: fingerprintOsLoginTiles,
+          ),
         if (isAndroid &&
             !disabledSettings &&
             !outgoingOnly &&

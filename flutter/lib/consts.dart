@@ -188,6 +188,9 @@ const String kOptionTrustedDeviceExpiration = "trusted-device-expiration-days";
 const String kOptionShowVirtualMouse = "show-virtual-mouse";
 const String kOptionVirtualMouseScale = "virtual-mouse-scale";
 const String kOptionShowVirtualJoystick = "show-virtual-joystick";
+/// Reuse the phone's enrolled fingerprint authenticator to sign in to a remote computer,
+/// mirroring the "fingerprint payment" pattern: nothing is sent until the sensor confirms.
+const String kOptionFingerprintOsLogin = "fingerprint-os-login";
 const String kOptionAllowAskForNoteAtEndOfConnection = "allow-ask-for-note";
 const String kOptionAllowMonitorSwitchMainToolbar = "allow-monitor-switch-main-toolbar";
 const String kOptionAllowMonitorSwitchMinToolbar = "allow-monitor-switch-min-toolbar";

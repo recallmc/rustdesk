@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common.dart';
+import 'package:flutter_hbb/common/biometric_gate.dart';
 import 'package:flutter_hbb/common/shared_state.dart';
 import 'package:flutter_hbb/common/widgets/dialog.dart';
 import 'package:flutter_hbb/common/widgets/login.dart';
@@ -278,6 +279,39 @@ handleOsPasswordAction(
   }
 }
 
+/// Fingerprint sign-in for the remote computer's OS login screen.
+///
+/// Mirrors "fingerprint payment": the phone's own enrolled biometric is the authorisation factor
+/// and the stored OS password is only sent after the sensor confirms. The ordinary OS-password
+/// path is untouched, so a failed or absent fingerprint falls back to typing it.
+Future<void> handleFingerprintOsLogin(
+    SessionID sessionId, OverlayDialogManager dialogManager) async {
+  final password =
+      await bind.sessionGetOption(sessionId: sessionId, arg: 'os-password') ?? '';
+  if (password.isEmpty) {
+    showToast(translate('Set the OS password first'));
+    showSetOSPassword(sessionId, false, dialogManager, password, null);
+    return;
+  }
+  final outcome = await BiometricGate.instance.verify(
+      reason: translate('Confirm your fingerprint to sign in to the computer'));
+  switch (outcome) {
+    case BiometricOutcome.ok:
+      bind.sessionInputOsPassword(sessionId: sessionId, value: password);
+      showToast(translate('Signing in...'));
+      break;
+    case BiometricOutcome.cancelled:
+      // Silent: the user changed their mind, nothing was sent.
+      break;
+    case BiometricOutcome.failed:
+      showToast(translate('Fingerprint verification failed'));
+      break;
+    case BiometricOutcome.unavailable:
+      showToast(translate('No fingerprint is set up on this device'));
+      break;
+  }
+}
+
 void showWaylandKeyboardInputWarningDialog(
     {required String id,
     required String connectionId,
@@ -497,6 +531,21 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
         onPressed: () => handleOsPasswordAction(sessionId, ffi.dialogManager),
       ),
     );
+  }
+  // Fingerprint sign-in for the remote OS login screen: only on phones that enabled the setting.
+  // It is listed independently of the password entry, so the session never has to "pick a login
+  // method" first -- the sensor result is the gate, then the stored password is submitted.
+  if (isMobile &&
+      isDefaultConn &&
+      perms['keyboard'] != false &&
+      mainGetBoolOptionSync(kOptionFingerprintOsLogin)) {
+    v.add(TTextMenu(
+      child: Row(children: [
+        Icon(Icons.fingerprint, size: isMobile ? 20 : 16),
+        Text(translate('Fingerprint sign in')).paddingOnly(left: 6),
+      ]),
+      onPressed: () => handleFingerprintOsLogin(sessionId, ffi.dialogManager),
+    ));
   }
   // paste
   if (isDefaultConn &&
