@@ -2,6 +2,12 @@
 cmake_minimum_required(VERSION 3.14)
 project(rustdesk LANGUAGES CXX)
 
+# `local_auth_windows` (pulled in for the mobile fingerprint feature) still includes the
+# deprecated <experimental/coroutine> header. MSVC 14.52+ turns that into a hard error
+# (STL1011) on the Windows ARM64 runner. The macro only silences the deprecation; define it
+# before plugins are added so it reaches their targets too.
+add_definitions(-D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)
+
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
 set(BINARY_NAME "rustdesk")
