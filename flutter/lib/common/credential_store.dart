@@ -21,6 +21,27 @@ class CredentialStore {
   /// secure-store/read on every rebuild. Rx means the badge updates as soon as the load finishes.
   final configuredPeerIds = <String>[].obs;
 
+  /// Peer id -> wall clock ms of a successful local authentication.
+  ///
+  /// The prompt happens when the user taps the computer, but the password is only needed once the
+  /// remote side asks for it (a few seconds later). This short-lived, single-use hand-off keeps the
+  /// tap -> fingerprint -> sign-in flow from depending on when that prompt arrives.
+  final Map<String, int> _authorizedAt = {};
+
+  void authorize(String peerId) {
+    _authorizedAt[peerId] = DateTime.now().millisecondsSinceEpoch;
+  }
+
+  /// Consumes a previous authorization. Returns false when it is missing or expired.
+  bool consumeAuthorization(String peerId,
+      {Duration ttl = const Duration(minutes: 2)}) {
+    final at = _authorizedAt.remove(peerId);
+    if (at == null) return false;
+    return DateTime.now().millisecondsSinceEpoch - at <= ttl.inMilliseconds;
+  }
+
+  void clearAuthorization(String peerId) => _authorizedAt.remove(peerId);
+
   bool has(String peerId) => configuredPeerIds.contains(peerId);
 
   Future<void> loadIds() async {

@@ -878,12 +878,16 @@ class FfiModel with ChangeNotifier {
     if (credential == null || !credential.canAutoSubmit) return false;
 
     if (credential.biometricRequired) {
-      final outcome = await BiometricGate.instance
-          .verify(reason: 'Confirm it is you to sign in to $peerId');
-      if (outcome == BiometricOutcome.failed) {
-        await store.recordFailure(peerId);
+      // The tap on the peer card already authenticated this peer; only ask again when the
+      // authorization is missing or expired (e.g. connected by id, or the prompt arrived late).
+      if (!store.consumeAuthorization(peerId)) {
+        final outcome = await BiometricGate.instance
+            .verify(reason: 'Confirm it is you to sign in to $peerId');
+        if (outcome == BiometricOutcome.failed) {
+          await store.recordFailure(peerId);
+        }
+        if (outcome != BiometricOutcome.ok) return false;
       }
-      if (outcome != BiometricOutcome.ok) return false;
     }
 
     gFFI.login(credential.osUsername, credential.osSecret, sessionId,

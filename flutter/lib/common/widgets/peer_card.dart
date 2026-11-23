@@ -3,6 +3,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common/widgets/dialog.dart';
+import 'package:flutter_hbb/common/biometric_gate.dart';
 import 'package:flutter_hbb/common/credential_store.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/models/peer_tab_model.dart';
@@ -1589,6 +1590,52 @@ class TagPainter extends CustomPainter {
   }
 }
 
+/// Asks for the local fingerprint as soon as the user taps a computer that has a saved credential,
+/// instead of waiting for the remote password dialog to appear.
+///
+/// Returns false only when the user cancelled the prompt (then the connection is not started).
+/// Failure / unsupported / no-enrolment all let the connection continue and fall back to the
+/// ordinary password dialog, so a broken sensor cannot lock anyone out.
+Future<bool> _preAuthorizeSavedCredential(Peer peer) async {
+  final store = CredentialStore.instance;
+  // Read the record rather than trusting the cached id list: on a cold start the list may still
+  // be loading, and a miss here would silently skip the fingerprint prompt.
+  final credential = await store.read(peer.id);
+  if (credential == null) {
+    return true;
+  }
+  if (!credential.canAutoSubmit) {
+    // Stale (the remote rejected it) or temporarily locked after repeated failures: skip the
+    // prompt entirely and let the ordinary dialog take over, otherwise the user would authenticate
+    // and still end up typing the password.
+    showToast('Saved password needs updating. Enter it manually.');
+    return true;
+  }
+  if (!credential.biometricRequired) {
+    store.authorize(peer.id);
+    return true;
+  }
+
+  final target = peer.hostname.isNotEmpty ? peer.hostname : peer.id;
+  final outcome = await BiometricGate.instance
+      .verify(reason: 'Confirm it is you to sign in to $target');
+  switch (outcome) {
+    case BiometricOutcome.ok:
+      store.authorize(peer.id);
+      return true;
+    case BiometricOutcome.cancelled:
+      // Nothing is submitted; the user stays on the list.
+      return false;
+    case BiometricOutcome.failed:
+      await store.recordFailure(peer.id);
+      showToast('Fingerprint not recognised. Enter the password manually.');
+      return true;
+    case BiometricOutcome.unavailable:
+      showToast('No fingerprint available. Enter the password manually.');
+      return true;
+  }
+}
+
 void connectInPeerTab(BuildContext context, Peer peer, PeerTabIndex tab,
     {bool isFileTransfer = false,
     bool isViewCamera = false,
@@ -1620,6 +1667,18 @@ void connectInPeerTab(BuildContext context, Peer peer, PeerTabIndex tab,
           isSharedPassword = true;
         }
       }
+    }
+  }
+  // Fingerprint first, at tap time, for a plain desktop connection of a peer with a saved
+  // credential. File transfer / camera / terminal / RDP do not use the password, so they skip it.
+  if (isMobile &&
+      !isFileTransfer &&
+      !isViewCamera &&
+      !isTcpTunneling &&
+      !isRDP &&
+      !isTerminal) {
+    if (!await _preAuthorizeSavedCredential(peer)) {
+      return;
     }
   }
   connect(context, peer.id,
