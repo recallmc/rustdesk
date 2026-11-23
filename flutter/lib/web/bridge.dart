@@ -888,6 +888,40 @@ class RustdeskImpl {
     return Future(() => js.context.callMethod('getByName', ['version']));
   }
 
+  // Saved peer credentials are native-only (encrypted store + biometric gate).
+  Future<bool> peerCredentialSave(
+      {required String id,
+      required String accessSecret,
+      required String osUsername,
+      required String osSecret,
+      required String label,
+      required bool biometricRequired,
+      dynamic hint}) {
+    return Future.value(false);
+  }
+
+  Future<String> peerCredentialLoad({required String id, dynamic hint}) {
+    return Future.value('');
+  }
+
+  Future<bool> peerCredentialDelete({required String id, dynamic hint}) =>
+      Future.value(false);
+
+  Future<bool> peerCredentialHas({required String id, dynamic hint}) =>
+      Future.value(false);
+
+  Future<List<String>> peerCredentialIds({dynamic hint}) => Future.value([]);
+
+  Future<bool> peerCredentialSetState(
+          {required String id, required String state, dynamic hint}) =>
+      Future.value(false);
+
+  Future<bool> peerCredentialTouch({required String id, dynamic hint}) =>
+      Future.value(false);
+
+  Future<int> peerCredentialRecordFailure({required String id, dynamic hint}) =>
+      Future.value(0);
+
   Future<List<String>> mainGetFav({dynamic hint}) {
     List<String> favs = [];
     try {

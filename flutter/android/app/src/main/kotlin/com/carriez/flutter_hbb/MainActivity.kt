@@ -36,6 +36,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import com.hjq.permissions.XXPermissions
 import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.android.FlutterView
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -45,7 +46,8 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 
 
-class MainActivity : FlutterActivity() {
+// local_auth needs a FragmentActivity; FlutterActivity.FLUTTER_VIEW_ID is still used below.
+class MainActivity : FlutterFragmentActivity() {
     companion object {
         var flutterMethodChannel: MethodChannel? = null
         private var _rdClipboardManager: RdClipboardManager? = null
@@ -82,7 +84,7 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         if (MainService.isReady) {
-            Intent(activity, MainService::class.java).also {
+            Intent(this@MainActivity, MainService::class.java).also {
                 bindService(it, serviceConnection, Context.BIND_AUTO_CREATE)
             }
         }
@@ -103,7 +105,7 @@ class MainActivity : FlutterActivity() {
     override fun onResume() {
         super.onResume()
         val inputPer = InputService.isOpen
-        activity.runOnUiThread {
+        this@MainActivity.runOnUiThread {
             flutterMethodChannel?.invokeMethod(
                 "on_state_changed",
                 mapOf("name" to "input", "value" to inputPer.toString())
@@ -291,7 +293,7 @@ class MainActivity : FlutterActivity() {
             // make sure result will be invoked, otherwise flutter will await forever
             when (call.method) {
                 "init_service" -> {
-                    Intent(activity, MainService::class.java).also {
+                    Intent(this@MainActivity, MainService::class.java).also {
                         bindService(it, serviceConnection, Context.BIND_AUTO_CREATE)
                     }
                     if (MainService.isReady) {
@@ -319,14 +321,14 @@ class MainActivity : FlutterActivity() {
                 }
                 "check_permission" -> {
                     if (call.arguments is String) {
-                        result.success(XXPermissions.isGranted(context, call.arguments as String))
+                        result.success(XXPermissions.isGranted(this@MainActivity, call.arguments as String))
                     } else {
                         result.success(false)
                     }
                 }
                 "request_permission" -> {
                     if (call.arguments is String) {
-                        requestPermission(context, call.arguments as String)
+                        requestPermission(this@MainActivity, call.arguments as String)
                         result.success(true)
                     } else {
                         result.success(false)
@@ -334,7 +336,7 @@ class MainActivity : FlutterActivity() {
                 }
                 START_ACTION -> {
                     if (call.arguments is String) {
-                        startAction(context, call.arguments as String)
+                        startAction(this@MainActivity, call.arguments as String)
                         result.success(true)
                     } else {
                         result.success(false)

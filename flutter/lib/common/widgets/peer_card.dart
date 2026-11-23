@@ -3,6 +3,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common/widgets/dialog.dart';
+import 'package:flutter_hbb/common/credential_store.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/models/peer_tab_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
@@ -15,6 +16,7 @@ import '../../models/peer_model.dart';
 import '../../models/platform_model.dart';
 import '../../desktop/widgets/material_mod_popup_menu.dart' as mod_menu;
 import '../../desktop/widgets/popup_menu.dart';
+import 'credential_dialog.dart';
 import 'dart:math' as math;
 
 typedef PopupMenuEntryBuilder = Future<List<mod_menu.PopupMenuEntry<String>>>
@@ -402,6 +404,13 @@ class _PeerCardState extends State<_PeerCard>
             left: 12,
             child: Icon(Icons.key, size: 12, color: Colors.white),
           ),
+        // A saved one-tap credential is a different state from an address-book shared password.
+        if (isMobile && CredentialStore.instance.has(peer.id))
+          Positioned(
+            bottom: 4,
+            left: 12,
+            child: Icon(Icons.vpn_key, size: 14, color: Colors.green.shade700),
+          ),
         if (colors.isNotEmpty)
           Positioned(
             top: 4,
@@ -592,6 +601,9 @@ abstract class BasePeerCard extends StatelessWidget {
     if (isWindows && peer.platform == kPeerPlatformWindows) {
       menuItems.add(_rdpAction(context, peer.id));
     }
+    if (isMobile) {
+      menuItems.add(_savedCredentialAction(context));
+    }
     menuItems.add(MenuEntryDivider<String>());
     menuItems.add(_requestApprovalAction(context));
     // menuItems.add(await _openNewConnInOptAction(peer.id));
@@ -599,6 +611,19 @@ abstract class BasePeerCard extends StatelessWidget {
       menuItems.add(await _forceAlwaysRelayAction(peer.id));
     }
     return menuItems;
+  }
+
+  MenuEntryButton<String> _savedCredentialAction(BuildContext context) {
+    final configured = CredentialStore.instance.has(peer.id);
+    return MenuEntryButton<String>(
+      childBuilder: (TextStyle? style) => Text(
+        configured ? 'Saved login password...' : 'Save login password...',
+        style: style,
+      ),
+      proc: () => showCredentialDialog(peer.id, hostName: peer.hostname),
+      padding: menuPadding,
+      dismissOnClicked: true,
+    );
   }
 
   MenuEntryButton<String> _connectCommonAction(
