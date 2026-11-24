@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Abi;
 
 import 'package:auto_size_text_field/auto_size_text_field.dart';
 import 'package:flutter/material.dart';
@@ -124,9 +125,10 @@ class _ConnectionPageState extends State<ConnectionPage> {
         ? const SizedBox(height: 0)
         : InkWell(
             onTap: () async {
-              // `updateUrl` is the release page of the configured update source, so a
-              // build from a fork never sends the user to the upstream download page.
-              final url = updateUrl;
+              // Prefer the APK built for this device's CPU. The release page lists one APK per
+              // architecture, and picking the wrong one fails with "app isn't compatible with
+              // your system" (INSTALL_FAILED_NO_MATCHING_ABIS, -113).
+              final url = _androidUpdateAssetUrl(updateUrl) ?? updateUrl;
               // https://pub.dev/packages/url_launcher#configuration
               // https://developer.android.com/training/package-visibility/use-cases#open-urls-custom-tabs
               //
@@ -145,6 +147,35 @@ class _ConnectionPageState extends State<ConnectionPage> {
                 child: Text(translate('Download new version'),
                     style: const TextStyle(
                         color: Colors.white, fontWeight: FontWeight.bold))));
+  }
+
+  /// The APK asset of [releasePageUrl] that matches this device, or null when it cannot be known.
+  ///
+  /// `https://host/<owner>/<repo>/releases/tag/<tag>` becomes
+  /// `https://host/<owner>/<repo>/releases/download/<tag>/rustdesk-<version>-<arch>-signed.apk`,
+  /// the name the release workflow publishes.
+  String? _androidUpdateAssetUrl(String releasePageUrl) {
+    if (!isAndroid) return null;
+    final uri = Uri.tryParse(releasePageUrl);
+    if (uri == null) return null;
+    final segments = uri.pathSegments;
+    if (segments.length < 2 || segments[segments.length - 2] != 'tag') return null;
+    final tag = segments.last;
+    if (tag.isEmpty) return null;
+    final version = tag.startsWith('v') ? tag.substring(1) : tag;
+    final arch = switch (Abi.current()) {
+      Abi.androidArm64 => 'aarch64',
+      Abi.androidArm => 'armv7',
+      Abi.androidX64 => 'x86_64',
+      _ => null,
+    };
+    if (arch == null) return null;
+    final downloadUri = uri.replace(pathSegments: [
+      ...segments.sublist(0, segments.length - 2),
+      'download',
+      tag,
+    ]);
+    return '$downloadUri/rustdesk-$version-$arch-signed.apk';
   }
 
   /// UI for the remote ID TextField.
