@@ -1899,6 +1899,13 @@ pub fn main_set_start_on_boot(enable: bool) -> SyncReturn<bool> {
     SyncReturn(true)
 }
 
+/// CPU architecture this build was compiled for, e.g. `aarch64` or `x86_64`.
+///
+/// Used to pick the matching APK from a release, whose assets are named after this value.
+pub fn main_get_target_arch() -> SyncReturn<String> {
+    SyncReturn(std::env::consts::ARCH.to_owned())
+}
+
 pub fn main_get_home_dir() -> String {
     fs::get_home_as_string()
 }

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io' show Abi;
 
 import 'package:auto_size_text_field/auto_size_text_field.dart';
 import 'package:flutter/material.dart';
@@ -163,10 +162,12 @@ class _ConnectionPageState extends State<ConnectionPage> {
     final tag = segments.last;
     if (tag.isEmpty) return null;
     final version = tag.startsWith('v') ? tag.substring(1) : tag;
-    final arch = switch (Abi.current()) {
-      Abi.androidArm64 => 'aarch64',
-      Abi.androidArm => 'armv7',
-      Abi.androidX64 => 'x86_64',
+    // The release names its APKs after the Rust target architecture, so ask the build itself
+    // instead of mapping a Dart-side ABI name.
+    final arch = switch (bind.mainGetTargetArch()) {
+      'aarch64' => 'aarch64',
+      'arm' => 'armv7',
+      'x86_64' => 'x86_64',
       _ => null,
     };
     if (arch == null) return null;
