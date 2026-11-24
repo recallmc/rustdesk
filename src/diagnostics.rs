@@ -5,8 +5,10 @@
 //! controlled machine is locked, that service is the process that handles the connection, so the
 //! interesting lines are exactly the ones a user cannot reach.
 //!
-//! This writes a small, rotating file under `%ProgramData%` instead. ProgramData is readable by
-//! every local user, so the file can be attached to a bug report without elevation.
+//! This writes a small, rotating file next to the executable (`<install dir>\diagnostics\`)
+//! instead: it keeps the system drive clean and lands where people look for program files. A
+//! read-only install falls back to `%ProgramData%\RustDesk\diagnostics`, which every local user
+//! can read.
 //!
 //! Never write secrets here: passwords are only ever logged by length.
 
@@ -16,15 +18,62 @@ use std::path::PathBuf;
 /// Keep the file small enough to paste into a chat window.
 const MAX_BYTES: u64 = 512 * 1024;
 
+/// Resolved once per process: the directory is not going to change under us.
+static DIR: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+
 fn diagnostics_dir() -> Option<PathBuf> {
+    DIR.get_or_init(resolve_dir).clone()
+}
+
+fn resolve_dir() -> Option<PathBuf> {
+    // Prefer the install directory: it is the place a user looks for program files, and on a
+    // machine with a small system drive it keeps diagnostics off C:. The service runs as SYSTEM so
+    // it can write under Program Files; a user-writable install (portable) works too.
+    if let Some(install_dir) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("diagnostics")))
+    {
+        if make_writable(&install_dir) {
+            return Some(install_dir);
+        }
+    }
+    // Fallback for read-only installs: ProgramData is world-readable and writable by the service.
     #[cfg(windows)]
     {
         let base = std::env::var("ProgramData").ok().filter(|v| !v.is_empty())?;
-        Some(PathBuf::from(base).join("RustDesk").join("diagnostics"))
+        let dir = PathBuf::from(base).join("RustDesk").join("diagnostics");
+        if make_writable(&dir) {
+            return Some(dir);
+        }
+        None
     }
     #[cfg(not(windows))]
     {
-        Some(std::env::temp_dir().join("rustdesk-diagnostics"))
+        let dir = std::env::temp_dir().join("rustdesk-diagnostics");
+        if make_writable(&dir) {
+            return Some(dir);
+        }
+        None
+    }
+}
+
+/// Creates `dir` and proves it is writable, so a later write does not fail silently.
+fn make_writable(dir: &PathBuf) -> bool {
+    if std::fs::create_dir_all(dir).is_err() {
+        return false;
+    }
+    let probe = dir.join(".write-test");
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&probe)
+    {
+        Ok(_) => {
+            let _ = std::fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
     }
 }
 
