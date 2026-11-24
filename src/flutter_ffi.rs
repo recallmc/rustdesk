@@ -1879,17 +1879,17 @@ pub fn main_get_software_update_url() {
 }
 
 /// Whether the desktop client is registered to start with the user session.
-pub fn main_get_start_on_boot() -> bool {
-    crate::platform::get_start_on_boot()
+pub fn main_get_start_on_boot() -> SyncReturn<bool> {
+    SyncReturn(crate::platform::get_start_on_boot())
 }
 
 /// Register or unregister the desktop client for the user session. Returns whether it worked.
-pub fn main_set_start_on_boot(enable: bool) -> bool {
+pub fn main_set_start_on_boot(enable: bool) -> SyncReturn<bool> {
     if let Err(e) = crate::platform::set_start_on_boot(enable) {
         log::error!("Failed to set start on boot to {}: {}", enable, e);
-        return false;
+        return SyncReturn(false);
     }
-    true
+    SyncReturn(true)
 }
 
 pub fn main_get_home_dir() -> String {

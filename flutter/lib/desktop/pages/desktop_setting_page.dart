@@ -543,9 +543,8 @@ class _GeneralState extends State<_General> {
           ),
           trailing: Switch(
             value: _startOnBoot,
-            onChanged: (v) async {
-              final ok = bind.mainSetStartOnBoot(v);
-              if (!mounted) return;
+            onChanged: (v) {
+              final ok = bind.mainSetStartOnBoot(enable: v);
               setState(() {
                 if (ok) {
                   _startOnBoot = v;
