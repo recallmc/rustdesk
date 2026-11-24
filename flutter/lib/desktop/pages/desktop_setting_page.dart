@@ -408,6 +408,13 @@ class _GeneralState extends State<_General> {
       isWeb ? RxBool(false) : Get.find<RxBool>(tag: 'stop-service');
   RxBool serviceBtnEnabled = true.obs;
   final GlobalKey _minToolbarOptionKey = GlobalKey();
+  bool _startOnBoot = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _startOnBoot = bind.mainGetStartOnBoot();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -527,6 +534,35 @@ class _GeneralState extends State<_General> {
     final showAutoUpdate = (isWindows && bind.mainIsInstalled()) ||
     (isMacOS && bind.mainIsInstalled() && bind.mainIsInstalledDaemon(prompt: false) && !bind.isCustomClient());
     final children = <Widget>[
+      if (!isWeb && !incomingOnly)
+        ListTile(
+          leading: Icon(Icons.power_settings_new, color: _accentColor),
+          title: Text(
+            translate('Start on boot'),
+            style: TextStyle(fontSize: _kContentFontSize),
+          ),
+          trailing: Switch(
+            value: _startOnBoot,
+            onChanged: (v) async {
+              final ok = bind.mainSetStartOnBoot(v);
+              if (!mounted) return;
+              setState(() {
+                if (ok) {
+                  _startOnBoot = v;
+                }
+              });
+              if (!ok) {
+                showToast(translate('Failed to change the start on boot setting'));
+              }
+            },
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+          contentPadding: EdgeInsets.symmetric(horizontal: 16),
+          minLeadingWidth: 0,
+          horizontalTitleGap: 10,
+        ),
       if (!isWeb && !incomingOnly)
         _OptionCheckBox(context, 'Confirm before closing multiple tabs',
             kOptionEnableConfirmClosingTabs,

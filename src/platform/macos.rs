@@ -2163,6 +2163,64 @@ pub(crate) fn get_bundle_id() -> Option<String> {
     }
 }
 
+/// `~/Library/LaunchAgents/com.<app>.plist`
+fn launch_agent_path() -> ResultType<std::path::PathBuf> {
+    let home = match std::env::var("HOME") {
+        Ok(v) if !v.is_empty() => std::path::PathBuf::from(v),
+        _ => bail!("HOME is not set"),
+    };
+    let label = format!("com.{}", crate::get_app_name().to_lowercase());
+    Ok(home
+        .join("Library")
+        .join("LaunchAgents")
+        .join(format!("{label}.plist")))
+}
+
+/// Whether the client is registered to start with the user session.
+pub fn get_start_on_boot() -> bool {
+    match launch_agent_path() {
+        Ok(path) => path.exists(),
+        Err(e) => {
+            log::warn!("Failed to resolve the launch agent: {}", e);
+            false
+        }
+    }
+}
+
+/// Add or remove the launch agent that starts the tray with the user session.
+pub fn set_start_on_boot(enable: bool) -> ResultType<()> {
+    let path = launch_agent_path()?;
+    if enable {
+        if path.exists() {
+            return Ok(());
+        }
+        let exe = std::env::current_exe()?;
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let label = format!("com.{}", crate::get_app_name().to_lowercase());
+        let plist = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+             <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
+             <plist version=\"1.0\">\n\
+             <dict>\n\
+             \x20 <key>Label</key><string>{label}</string>\n\
+             \x20 <key>ProgramArguments</key>\n\
+             \x20 <array><string>{}</string><string>--tray</string></array>\n\
+             \x20 <key>RunAtLoad</key><true/>\n\
+             </dict>\n\
+             </plist>\n",
+            exe.to_string_lossy()
+        );
+        std::fs::write(&path, plist)?;
+        log::info!("Enabled start on boot: {}", path.display());
+    } else if path.exists() {
+        std::fs::remove_file(&path)?;
+        log::info!("Disabled start on boot: {}", path.display());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod network_error_tests {
     use super::is_host_unreachable_error;

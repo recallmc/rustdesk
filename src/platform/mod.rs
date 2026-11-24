@@ -5,6 +5,16 @@ pub use macos::*;
 #[cfg(windows)]
 pub use windows::*;
 
+#[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+pub fn get_start_on_boot() -> bool {
+    false
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+pub fn set_start_on_boot(_enable: bool) -> hbb_common::ResultType<()> {
+    Ok(())
+}
+
 #[cfg(windows)]
 pub mod windows;
 

@@ -1878,6 +1878,20 @@ pub fn main_get_software_update_url() {
     crate::common::check_software_update();
 }
 
+/// Whether the desktop client is registered to start with the user session.
+pub fn main_get_start_on_boot() -> bool {
+    crate::platform::get_start_on_boot()
+}
+
+/// Register or unregister the desktop client for the user session. Returns whether it worked.
+pub fn main_set_start_on_boot(enable: bool) -> bool {
+    if let Err(e) = crate::platform::set_start_on_boot(enable) {
+        log::error!("Failed to set start on boot to {}: {}", enable, e);
+        return false;
+    }
+    true
+}
+
 pub fn main_get_home_dir() -> String {
     fs::get_home_as_string()
 }

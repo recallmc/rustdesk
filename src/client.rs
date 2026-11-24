@@ -4447,6 +4447,13 @@ fn _input_os_password(p: String, activate: bool, interface: impl Interface) {
         // Click event is used to bring up the password input box.
         activate_os(&interface, input_password);
         std::thread::sleep(Duration::from_millis(1200));
+        if input_password {
+            // The click above lands wherever the pointer happens to be, so on a lock screen that
+            // shows a user tile it never focuses the credential field and the typed password goes
+            // nowhere. A key press dismisses the lock screen and moves the focus into the field.
+            wake_os(&interface);
+            std::thread::sleep(Duration::from_millis(800));
+        }
     }
     if !input_password {
         return;
@@ -4459,6 +4466,21 @@ fn _input_os_password(p: String, activate: bool, interface: impl Interface) {
     msg_out.set_key_event(key_event.clone());
     interface.send(Data::Message(msg_out.clone()));
     key_event.set_control_key(ControlKey::Return);
+    msg_out.set_key_event(key_event);
+    interface.send(Data::Message(msg_out));
+}
+
+/// Wake up the OS login / lock screen so that the credential field has the focus.
+///
+/// Escape is used on purpose: it dismisses the lock screen and, when the sign-in form is already
+/// showing, leaves the (empty) password field untouched. A printable character would end up
+/// inside the password when the field already has the focus.
+fn wake_os(interface: &impl Interface) {
+    let mut key_event = KeyEvent::new();
+    key_event.mode = KeyboardMode::Legacy.into();
+    key_event.press = true;
+    key_event.set_control_key(ControlKey::Escape);
+    let mut msg_out = Message::new();
     msg_out.set_key_event(key_event);
     interface.send(Data::Message(msg_out));
 }

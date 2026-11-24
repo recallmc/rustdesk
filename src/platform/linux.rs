@@ -3098,6 +3098,58 @@ pub fn check_autostart_config() -> ResultType<()> {
     Ok(())
 }
 
+/// `~/.config/autostart/<app>.desktop`
+fn autostart_desktop_file() -> ResultType<std::path::PathBuf> {
+    // Use the trusted home directory instead of $HOME, see `check_autostart_config`.
+    let home = match get_home_dir_trusted() {
+        Some(p) => p.to_path_buf(),
+        None => bail!("Failed to get trusted home directory for autostart"),
+    };
+    let app_name = crate::get_app_name().to_lowercase();
+    Ok(home
+        .join(".config")
+        .join("autostart")
+        .join(format!("{app_name}.desktop")))
+}
+
+/// Whether the client is registered to start with the user session.
+pub fn get_start_on_boot() -> bool {
+    match autostart_desktop_file() {
+        Ok(path) => path.exists(),
+        Err(e) => {
+            log::warn!("Failed to resolve the autostart desktop file: {}", e);
+            false
+        }
+    }
+}
+
+/// Add or remove the autostart desktop entry.
+pub fn set_start_on_boot(enable: bool) -> ResultType<()> {
+    let file = autostart_desktop_file()?;
+    if enable {
+        if file.exists() {
+            return Ok(());
+        }
+        let exe = std::env::current_exe()?;
+        if let Some(dir) = file.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        std::fs::write(
+            &file,
+            format!(
+                "[Desktop Entry]\nType=Application\nName={}\nExec={} --tray\nX-GNOME-Autostart-enabled=true\nTerminal=false\n",
+                crate::get_app_name(),
+                exe.to_string_lossy()
+            ),
+        )?;
+        log::info!("Enabled start on boot: {}", file.display());
+    } else if file.exists() {
+        std::fs::remove_file(&file)?;
+        log::info!("Disabled start on boot: {}", file.display());
+    }
+    Ok(())
+}
+
 pub struct WallPaperRemover {
     old_path: String,
     old_path_dark: Option<String>, // ubuntu 22.04 light/dark theme have different uri

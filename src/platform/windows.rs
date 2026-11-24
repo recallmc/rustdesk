@@ -105,6 +105,8 @@ mod installer_handoff;
 mod installer_shell;
 mod verified_update;
 mod msi_registry;
+mod autostart;
+pub use autostart::{get_start_on_boot, set_start_on_boot};
 pub(crate) use acl::current_process_user_sid_string;
 pub use acl::{
     set_path_permission, set_path_permission_for_portable_service_shmem_dir,
