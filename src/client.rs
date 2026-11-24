@@ -3054,6 +3054,16 @@ impl LoginConfigHandler {
         }
     }
 
+    /// Platform of the connected peer, as reported in the peer info.
+    pub fn peer_platform(&self) -> String {
+        self.config.info.platform.clone()
+    }
+
+    /// Version number of the connected peer.
+    pub fn peer_version(&self) -> i64 {
+        self.version
+    }
+
     /// Load [`PeerConfig`].
     pub fn load_config(&self) -> PeerConfig {
         debug_assert!(self.id.len() > 0);
@@ -4507,8 +4517,34 @@ pub fn auto_login(p: String, pi: &PeerInfo, interface: impl Interface) {
 
 /// Windows and macOS peers from the 1.5.1 release handle `os_login`.
 fn is_peer_handling_os_login(pi: &PeerInfo) -> bool {
-    (pi.platform == crate::common::PLATFORM_WINDOWS || pi.platform == crate::common::PLATFORM_MACOS)
-        && hbb_common::get_version_number(&pi.version) >= hbb_common::get_version_number("1.5.1")
+    is_peer_handling_os_login_with(&pi.platform, hbb_common::get_version_number(&pi.version))
+}
+
+/// Same check, but for a peer whose platform and version are already known.
+fn is_peer_handling_os_login_with(platform: &str, version: i64) -> bool {
+    (platform == crate::common::PLATFORM_WINDOWS || platform == crate::common::PLATFORM_MACOS)
+        && version >= hbb_common::get_version_number("1.5.1")
+}
+
+/// Ask the peer to type the OS password on its own login screen.
+///
+/// The peer waits for the logon or lock screen to be up and types the password there, which is
+/// the only reliable way to unlock a machine: keystrokes injected from this side land wherever
+/// the pointer happens to be, so they never reach the credential field.
+pub fn os_login(p: String, platform: &str, version: i64, interface: impl Interface) {
+    if is_peer_handling_os_login_with(platform, version) {
+        let mut msg_out = Message::new();
+        msg_out.set_os_login(OSLogin {
+            password: p,
+            // The peer reports back what happened, so a failed sign in is not silent.
+            request: true,
+            ..Default::default()
+        });
+        interface.send(Data::Message(msg_out));
+    } else {
+        // The peer does not understand the message, so type it ourselves as before.
+        input_os_password(p, true, interface);
+    }
 }
 
 #[derive(Copy, Clone)]

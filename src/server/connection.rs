@@ -2524,11 +2524,13 @@ impl Connection {
     // The client sends this as soon as the peer info arrives, which can be before Windows has
     // finished painting the logon UI. A single check therefore dropped the password often enough
     // to look like "auto login does nothing", so we poll for a short while before giving up.
+    //
+    // Returns whether the password was typed.
     #[cfg(any(target_os = "windows", target_os = "macos"))]
-    async fn type_auto_login_password(&self, password: String) {
+    async fn type_auto_login_password(&self, password: String) -> bool {
         if password.is_empty() {
             log::warn!("Auto login dropped: the stored OS password is empty");
-            return;
+            return false;
         }
         const MAX_ATTEMPTS: usize = 6;
         const RETRY_DELAY: Duration = Duration::from_millis(500);
@@ -2559,8 +2561,18 @@ impl Connection {
                 info,
                 "Auto login dropped, not at the logon or lock screen"
             );
-            return;
+            return false;
         }
+        // The sign-in screen shows the user tile first, and the credential field only appears
+        // after it is activated. Typing into that state goes nowhere, so press Return to open
+        // the field first. When the field already has the focus this submits an empty password,
+        // which Windows rejects and leaves the field focused, so the password below still lands.
+        let mut activate = KeyEvent::new();
+        activate.mode = KeyboardMode::Legacy.into();
+        activate.press = true;
+        activate.set_control_key(ControlKey::Return);
+        self.input_key(activate, true);
+        time::sleep(Duration::from_millis(900)).await;
         let mut key_event = KeyEvent::new();
         key_event.mode = KeyboardMode::Legacy.into();
         key_event.press = true;
@@ -2570,6 +2582,34 @@ impl Connection {
         CLICK_TIME.store(get_time(), Ordering::SeqCst);
         MOUSE_MOVE_TIME.store(get_time(), Ordering::SeqCst);
         self.input_key(key_event, true);
+        log::info!("OS password typed on the logon screen");
+        true
+    }
+
+    /// Tell the client what happened when it asked for the OS password to be typed.
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    async fn send_os_login_result(&mut self, typed: bool) {
+        let mut msg = Message::new();
+        let res = if typed {
+            MessageBox {
+                msgtype: "success".to_owned(),
+                title: "Signed in".to_owned(),
+                text: "The password was entered on the remote computer.".to_owned(),
+                link: "".to_owned(),
+                ..Default::default()
+            }
+        } else {
+            MessageBox {
+                msgtype: "error".to_owned(),
+                title: "Sign in failed".to_owned(),
+                text: "The remote computer was not at the login screen, so the password was not entered."
+                    .to_owned(),
+                link: "".to_owned(),
+                ..Default::default()
+            }
+        };
+        msg.set_message_box(res);
+        let _ = self.send(msg).await;
     }
 
     fn verify_h1(&self, h1: &[u8]) -> bool {
@@ -3457,7 +3497,11 @@ impl Connection {
                 #[cfg(any(target_os = "windows", target_os = "macos"))]
                 Some(message::Union::OsLogin(login)) => {
                     if self.peer_keyboard_enabled() {
-                        self.type_auto_login_password(login.password).await;
+                        let typed = self.type_auto_login_password(login.password).await;
+                        if login.request {
+                            // The client asked for this explicitly, so tell it what happened.
+                            self.send_os_login_result(typed).await;
+                        }
                     }
                     self.update_auto_disconnect_timer();
                 }

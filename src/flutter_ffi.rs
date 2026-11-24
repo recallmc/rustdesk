@@ -816,6 +816,13 @@ pub fn session_input_os_password(session_id: SessionID, value: String) {
     }
 }
 
+/// Ask the peer to type the OS password on its own login screen.
+pub fn session_os_login(session_id: SessionID, value: String) {
+    if let Some(session) = sessions::get_session_by_session_id(&session_id) {
+        session.os_login(value);
+    }
+}
+
 // File Action
 pub fn session_read_remote_dir(session_id: SessionID, path: String, include_hidden: bool) {
     if let Some(session) = sessions::get_session_by_session_id(&session_id) {
