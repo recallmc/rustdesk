@@ -63,6 +63,9 @@ message ViewCamera {}
 message OSLogin {
   string username = 1;
   string password = 2;
+  // Set when the peer asks for the password to be typed right now, so the peer can report
+  // back what happened instead of failing silently.
+  bool request = 3;
 }
 
 message LoginRequest {

@@ -688,6 +688,19 @@ impl<T: InvokeUiSession> Session<T> {
         input_os_password(pass, activate, self.clone());
     }
 
+    /// Ask the peer to type the OS password on its own login screen.
+    ///
+    /// Peers from 1.5.1 on Windows and macOS handle the `os_login` message and type the password
+    /// themselves once the logon or lock screen is up. Injecting the keystrokes from here instead
+    /// lands them wherever the pointer was, which is why the fingerprint sign-in never worked.
+    pub fn os_login(&self, pass: String) {
+        let (platform, version) = {
+            let lc = self.lc.read().unwrap();
+            (lc.peer_platform(), lc.peer_version())
+        };
+        crate::client::os_login(pass, &platform, version, self.clone());
+    }
+
     #[cfg(not(feature = "flutter"))]
     pub fn get_chatbox(&self) -> String {
         #[cfg(feature = "inline")]

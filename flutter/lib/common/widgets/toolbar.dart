@@ -297,8 +297,11 @@ Future<void> handleFingerprintOsLogin(
       reason: translate('Confirm your fingerprint to sign in to the computer'));
   switch (outcome) {
     case BiometricOutcome.ok:
-      bind.sessionInputOsPassword(sessionId: sessionId, value: password);
-      showToast(translate('Signing in...'));
+      // The peer types the password on its own login screen: it waits for the logon or lock
+      // screen to be up and then types it there. Injecting the keystrokes from here landed
+      // them wherever the pointer was, so the password never reached the credential field.
+      bind.sessionOsLogin(sessionId: sessionId, value: password);
+      showToast(translate('Sending the password to the remote computer...'));
       break;
     case BiometricOutcome.cancelled:
       // Silent: the user changed their mind, nothing was sent.
