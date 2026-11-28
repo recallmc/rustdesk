@@ -46,7 +46,8 @@ use winapi::{
         minwinbase::STILL_ACTIVE,
         processthreadsapi::{
             GetCurrentProcess, GetCurrentProcessId, GetExitCodeProcess, OpenProcess,
-            OpenProcessToken, ProcessIdToSessionId, PROCESS_INFORMATION, STARTUPINFOW,
+            OpenProcessToken, ProcessIdToSessionId, TerminateProcess, PROCESS_INFORMATION,
+            STARTUPINFOW,
         },
         securitybaseapi::{
             AllocateAndInitializeSid, DuplicateToken, EqualSid, FreeSid, GetTokenInformation,
@@ -1292,6 +1293,119 @@ pub fn is_logon_screen() -> bool {
     is_session_prelogin(session_id) == Some(true)
         || is_session_locked_flag(session_id) == Some(true)
 }
+
+/// Key that holds the credential provider the logon screen shows, per user session.
+const LOGON_UI_SUBKEY: &str =
+    "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Authentication\\LogonUI";
+/// Classic password field.
+pub const LOGON_PROVIDER_PASSWORD: &str = "{60b78e88-ead8-445c-9cfd-0b87f74ea6cd}";
+/// Windows Hello PIN.
+const LOGON_PROVIDER_PIN: &str = "{D6886603-9D2F-4EB2-B667-1971041FA96B}";
+/// Windows Hello biometrics (`BioCredProv.dll`).
+const LOGON_PROVIDER_BIOMETRIC: &str = "{BEC09223-B018-416D-A0AC-523971B639F5}";
+
+/// Which credential UI the logon screen is showing.
+///
+/// Typing a password only lands when this is [`LogonProvider::Password`]: on a machine that
+/// defaults to Windows Hello the screen has no text field at all, so the characters go nowhere
+/// and the session stays locked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LogonProvider {
+    Password,
+    Pin,
+    Biometric,
+    Other,
+}
+
+impl LogonProvider {
+    pub fn label(self) -> &'static str {
+        match self {
+            LogonProvider::Password => "password",
+            LogonProvider::Pin => "pin",
+            LogonProvider::Biometric => "biometric (Windows Hello)",
+            LogonProvider::Other => "unknown",
+        }
+    }
+}
+
+fn get_hklm_string(subkey: &str, name: &str) -> Option<String> {
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    hklm.open_subkey(subkey).ok()?.get_value(name).ok()
+}
+
+/// Provider the logon screen shows, with the raw GUID for diagnostics.
+pub fn last_logon_provider() -> (String, LogonProvider) {
+    let guid = get_hklm_string(LOGON_UI_SUBKEY, "LastLoggedOnProvider").unwrap_or_default();
+    let kind = if guid.eq_ignore_ascii_case(LOGON_PROVIDER_PASSWORD) {
+        LogonProvider::Password
+    } else if guid.eq_ignore_ascii_case(LOGON_PROVIDER_PIN) {
+        LogonProvider::Pin
+    } else if guid.eq_ignore_ascii_case(LOGON_PROVIDER_BIOMETRIC) {
+        LogonProvider::Biometric
+    } else {
+        LogonProvider::Other
+    };
+    (guid, kind)
+}
+
+/// Point the logon screen at the password field and restart it so the change is visible.
+///
+/// Windows renders whichever provider `LastLoggedOnProvider` names, and reads that value when
+/// LogonUI starts, so the process has to be restarted; winlogon does that on its own. Needs
+/// administrator rights, which the service has.
+pub fn switch_logon_screen_to_password() -> ResultType<()> {
+    let (_, kind) = last_logon_provider();
+    if kind == LogonProvider::Password {
+        return Ok(());
+    }
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    let key = hklm
+        .open_subkey_with_flags(LOGON_UI_SUBKEY, KEY_SET_VALUE)
+        .map_err(|e| anyhow!("cannot open the LogonUI key for writing: {e}"))?;
+    key.set_value("LastLoggedOnProvider", &LOGON_PROVIDER_PASSWORD)
+        .map_err(|e| anyhow!("cannot write LastLoggedOnProvider: {e}"))?;
+    log::info!(
+        "Logon provider {} switched to the password provider",
+        kind.label()
+    );
+    restart_logon_ui()?;
+    // winlogon relaunches LogonUI; wait for it and give the fresh screen a moment to take focus.
+    for _ in 0..40 {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        if get_pids("LogonUI.exe").map(|pids| !pids.is_empty()).unwrap_or(false) {
+            std::thread::sleep(std::time::Duration::from_millis(900));
+            return Ok(());
+        }
+    }
+    bail!("the logon screen did not come back after the provider switch")
+}
+
+/// Terminates LogonUI.exe, which winlogon restarts with the provider stored in the registry.
+fn restart_logon_ui() -> ResultType<()> {
+    let pids = get_pids("LogonUI.exe")?;
+    if pids.is_empty() {
+        bail!("LogonUI.exe is not running");
+    }
+    for pid in pids {
+        unsafe {
+            let handle = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
+            if handle.is_null() {
+                bail!(
+                    "cannot open LogonUI.exe: {}",
+                    std::io::Error::last_os_error()
+                );
+            }
+            let ok = TerminateProcess(handle, 0);
+            let err = std::io::Error::last_os_error();
+            CloseHandle(handle);
+            if ok == 0 {
+                bail!("cannot terminate LogonUI.exe: {err}");
+            }
+        }
+    }
+    Ok(())
+}
+
 
 fn is_session_prelogin(session_id: u32) -> Option<bool> {
     extern "C" {
