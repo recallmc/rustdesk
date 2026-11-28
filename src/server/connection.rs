@@ -358,7 +358,7 @@ impl TerminalUserToken {
 
 /// What happened when the client asked for the OS password to be typed at the login screen.
 #[cfg(any(target_os = "windows", target_os = "macos"))]
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 enum OsLoginOutcome {
     /// The machine was not showing a login or lock screen, so nothing was typed.
     NotAtLoginScreen,
@@ -366,6 +366,10 @@ enum OsLoginOutcome {
     TypedStillLocked,
     /// The password was typed and the session unlocked.
     TypedUnlocked,
+    /// The logon screen was showing a provider other than the password field and could not be
+    /// switched, so nothing was typed. Carries the reason.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    ProviderSwitchFailed(String),
 }
 pub struct Connection {
     inner: ConnInner,
@@ -2589,6 +2593,33 @@ impl Connection {
             crate::diagnostics::log("os-login", "dropped: not at the logon or lock screen");
             return OsLoginOutcome::NotAtLoginScreen;
         }
+        // A machine that signs in with Windows Hello shows a fingerprint prompt instead of a text
+        // field, so typing goes nowhere. Point the logon screen at the password provider first,
+        // and stop with a reason when that cannot be done.
+        #[cfg(windows)]
+        {
+            let (guid, kind) = crate::platform::last_logon_provider();
+            crate::diagnostics::log(
+                "os-login",
+                &format!("logon provider before typing: {} ({})", kind.label(), guid),
+            );
+            if kind != crate::platform::LogonProvider::Password {
+                match crate::platform::switch_logon_screen_to_password() {
+                    Ok(()) => crate::diagnostics::log(
+                        "os-login",
+                        "logon screen switched to the password provider",
+                    ),
+                    Err(e) => {
+                        log::error!("Cannot switch the logon screen to the password provider: {e}");
+                        crate::diagnostics::log(
+                            "os-login",
+                            &format!("switch to the password provider failed: {e}"),
+                        );
+                        return OsLoginOutcome::ProviderSwitchFailed(e.to_string());
+                    }
+                }
+            }
+        }
         // The sign-in screen shows the user tile first, and the credential field only appears
         // after it is activated. Typing into that state goes nowhere, so press Return to open
         // the field first. When the field already has the focus this submits an empty password,
@@ -2598,8 +2629,17 @@ impl Connection {
         activate.press = true;
         activate.set_control_key(ControlKey::Return);
         self.input_key(activate, true);
-        time::sleep(Duration::from_millis(900)).await;
+        time::sleep(Duration::from_millis(1200)).await;
         crate::diagnostics::log("os-login", "credential field activated with Return");
+        // A retry must not append to whatever a previous attempt left in the field.
+        for _ in 0..32 {
+            let mut backspace = KeyEvent::new();
+            backspace.mode = KeyboardMode::Legacy.into();
+            backspace.press = true;
+            backspace.set_control_key(ControlKey::Backspace);
+            self.input_key(backspace, true);
+        }
+        crate::diagnostics::log("os-login", "field cleared with Backspace before typing");
         let mut key_event = KeyEvent::new();
         key_event.mode = KeyboardMode::Legacy.into();
         key_event.press = true;
@@ -2612,11 +2652,22 @@ impl Connection {
         log::info!("OS password typed on the logon screen");
         crate::diagnostics::log("os-login", "password typed, submitted with Return");
         // Typing is not the same as signing in: if the credential is wrong the screen stays.
-        // Give Windows a moment to accept it, then say what actually happened.
-        time::sleep(Duration::from_millis(3000)).await;
-        let still_locked = tokio::task::spawn_blocking(crate::platform::is_logon_screen)
-            .await
-            .unwrap_or(true);
+        // Windows shows a welcome screen while it switches users, where the lock flag is still
+        // set, so poll instead of taking a single reading.
+        let mut still_locked = true;
+        for attempt in 0..16 {
+            time::sleep(Duration::from_millis(500)).await;
+            still_locked = tokio::task::spawn_blocking(crate::platform::is_logon_screen)
+                .await
+                .unwrap_or(true);
+            if !still_locked {
+                crate::diagnostics::log(
+                    "os-login",
+                    &format!("session unlocked after {:.1}s", (attempt + 1) as f32 * 0.5),
+                );
+                break;
+            }
+        }
         crate::diagnostics::log(
             "os-login",
             &format!("after submit, session still locked: {}", still_locked),
@@ -2634,40 +2685,55 @@ impl Connection {
     #[cfg(any(target_os = "windows", target_os = "macos"))]
     async fn send_os_login_result(&mut self, outcome: OsLoginOutcome) {
         let mut msg = Message::new();
-        let res = match outcome {
-            OsLoginOutcome::TypedUnlocked => MessageBox {
-                msgtype: "success".to_owned(),
-                title: "Signed in".to_owned(),
-                text: "The password was accepted and the remote computer is unlocked.".to_owned(),
-                link: "".to_owned(),
-                ..Default::default()
-            },
-            OsLoginOutcome::TypedStillLocked => MessageBox {
-                msgtype: "error".to_owned(),
-                title: "Password rejected".to_owned(),
-                text: "The password was typed but the remote computer is still at the login screen. Check the password: a Windows account that signs in with a PIN needs the PIN, not the account password."
-                    .to_owned(),
-                link: "".to_owned(),
-                ..Default::default()
-            },
-            OsLoginOutcome::NotAtLoginScreen => MessageBox {
-                msgtype: "error".to_owned(),
-                title: "Sign in failed".to_owned(),
-                text: "The remote computer was not at the login screen, so the password was not entered."
-                    .to_owned(),
-                link: "".to_owned(),
-                ..Default::default()
-            },
+        let (res, reported) = match &outcome {
+            OsLoginOutcome::TypedUnlocked => (
+                MessageBox {
+                    msgtype: "success".to_owned(),
+                    title: "Signed in".to_owned(),
+                    text: "The password was accepted and the remote computer is unlocked."
+                        .to_owned(),
+                    link: "".to_owned(),
+                    ..Default::default()
+                },
+                "reported to client: signed in",
+            ),
+            OsLoginOutcome::TypedStillLocked => (
+                MessageBox {
+                    msgtype: "error".to_owned(),
+                    title: "Password rejected".to_owned(),
+                    text: "The password was typed but the remote computer is still at the login screen. Check the password: a Windows account that signs in with a PIN needs the PIN, not the account password."
+                        .to_owned(),
+                    link: "".to_owned(),
+                    ..Default::default()
+                },
+                "reported to client: password rejected",
+            ),
+            OsLoginOutcome::ProviderSwitchFailed(reason) => (
+                MessageBox {
+                    msgtype: "error".to_owned(),
+                    title: "Cannot switch to password sign-in".to_owned(),
+                    text: format!(
+                        "The remote computer signs in with Windows Hello (fingerprint) or a PIN, and switching it to the password field failed: {reason}. Nothing was typed, so the screen is unchanged."
+                    ),
+                    link: "".to_owned(),
+                    ..Default::default()
+                },
+                "reported to client: provider switch failed",
+            ),
+            OsLoginOutcome::NotAtLoginScreen => (
+                MessageBox {
+                    msgtype: "error".to_owned(),
+                    title: "Sign in failed".to_owned(),
+                    text: "The remote computer was not at the login screen, so the password was not entered."
+                        .to_owned(),
+                    link: "".to_owned(),
+                    ..Default::default()
+                },
+                "reported to client: not at login screen",
+            ),
         };
         msg.set_message_box(res);
-        crate::diagnostics::log(
-            "os-login",
-            match outcome {
-                OsLoginOutcome::TypedUnlocked => "reported to client: signed in",
-                OsLoginOutcome::TypedStillLocked => "reported to client: password rejected",
-                OsLoginOutcome::NotAtLoginScreen => "reported to client: not at login screen",
-            },
-        );
+        crate::diagnostics::log("os-login", reported);
         let _ = self.send(msg).await;
     }
 
