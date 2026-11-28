@@ -35,6 +35,8 @@ pub(crate) mod update_hash;
 mod manual_update;
 mod version;
 pub use version::*;
+/// Readable support logs (`%ProgramData%\RustDesk\diagnostics`), see the module docs.
+pub mod diagnostics;
 #[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
 mod bridge_generated;
 #[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]

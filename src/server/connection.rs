@@ -355,6 +355,18 @@ impl TerminalUserToken {
         }
     }
 }
+
+/// What happened when the client asked for the OS password to be typed at the login screen.
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+#[derive(Copy, Clone)]
+enum OsLoginOutcome {
+    /// The machine was not showing a login or lock screen, so nothing was typed.
+    NotAtLoginScreen,
+    /// The password was typed but the session is still locked: a wrong credential.
+    TypedStillLocked,
+    /// The password was typed and the session unlocked.
+    TypedUnlocked,
+}
 pub struct Connection {
     inner: ConnInner,
     display_idx: usize,
@@ -2525,12 +2537,21 @@ impl Connection {
     // finished painting the logon UI. A single check therefore dropped the password often enough
     // to look like "auto login does nothing", so we poll for a short while before giving up.
     //
-    // Returns whether the password was typed.
+    // Returns what happened, so the client is told more than "the bytes were sent".
     #[cfg(any(target_os = "windows", target_os = "macos"))]
-    async fn type_auto_login_password(&self, password: String) -> bool {
+    async fn type_auto_login_password(&self, password: String) -> OsLoginOutcome {
+        crate::diagnostics::log(
+            "os-login",
+            &format!(
+                "request received on {}: password length {}",
+                std::env::consts::OS,
+                password.len()
+            ),
+        );
         if password.is_empty() {
             log::warn!("Auto login dropped: the stored OS password is empty");
-            return false;
+            crate::diagnostics::log("os-login", "dropped: stored password is empty");
+            return OsLoginOutcome::NotAtLoginScreen;
         }
         const MAX_ATTEMPTS: usize = 6;
         const RETRY_DELAY: Duration = Duration::from_millis(500);
@@ -2547,6 +2568,10 @@ impl Connection {
                     );
                     false
                 });
+            crate::diagnostics::log(
+                "os-login",
+                &format!("logon screen check {}: {}", attempt + 1, at_logon_screen),
+            );
             if at_logon_screen {
                 break;
             }
@@ -2561,7 +2586,8 @@ impl Connection {
                 info,
                 "Auto login dropped, not at the logon or lock screen"
             );
-            return false;
+            crate::diagnostics::log("os-login", "dropped: not at the logon or lock screen");
+            return OsLoginOutcome::NotAtLoginScreen;
         }
         // The sign-in screen shows the user tile first, and the credential field only appears
         // after it is activated. Typing into that state goes nowhere, so press Return to open
@@ -2573,6 +2599,7 @@ impl Connection {
         activate.set_control_key(ControlKey::Return);
         self.input_key(activate, true);
         time::sleep(Duration::from_millis(900)).await;
+        crate::diagnostics::log("os-login", "credential field activated with Return");
         let mut key_event = KeyEvent::new();
         key_event.mode = KeyboardMode::Legacy.into();
         key_event.press = true;
@@ -2583,32 +2610,64 @@ impl Connection {
         MOUSE_MOVE_TIME.store(get_time(), Ordering::SeqCst);
         self.input_key(key_event, true);
         log::info!("OS password typed on the logon screen");
-        true
+        crate::diagnostics::log("os-login", "password typed, submitted with Return");
+        // Typing is not the same as signing in: if the credential is wrong the screen stays.
+        // Give Windows a moment to accept it, then say what actually happened.
+        time::sleep(Duration::from_millis(3000)).await;
+        let still_locked = tokio::task::spawn_blocking(crate::platform::is_logon_screen)
+            .await
+            .unwrap_or(true);
+        crate::diagnostics::log(
+            "os-login",
+            &format!("after submit, session still locked: {}", still_locked),
+        );
+        if still_locked {
+            log::info!("OS password typed, but the session is still locked");
+            OsLoginOutcome::TypedStillLocked
+        } else {
+            log::info!("OS password accepted, the session is unlocked");
+            OsLoginOutcome::TypedUnlocked
+        }
     }
 
     /// Tell the client what happened when it asked for the OS password to be typed.
     #[cfg(any(target_os = "windows", target_os = "macos"))]
-    async fn send_os_login_result(&mut self, typed: bool) {
+    async fn send_os_login_result(&mut self, outcome: OsLoginOutcome) {
         let mut msg = Message::new();
-        let res = if typed {
-            MessageBox {
+        let res = match outcome {
+            OsLoginOutcome::TypedUnlocked => MessageBox {
                 msgtype: "success".to_owned(),
                 title: "Signed in".to_owned(),
-                text: "The password was entered on the remote computer.".to_owned(),
+                text: "The password was accepted and the remote computer is unlocked.".to_owned(),
                 link: "".to_owned(),
                 ..Default::default()
-            }
-        } else {
-            MessageBox {
+            },
+            OsLoginOutcome::TypedStillLocked => MessageBox {
+                msgtype: "error".to_owned(),
+                title: "Password rejected".to_owned(),
+                text: "The password was typed but the remote computer is still at the login screen. Check the password: a Windows account that signs in with a PIN needs the PIN, not the account password."
+                    .to_owned(),
+                link: "".to_owned(),
+                ..Default::default()
+            },
+            OsLoginOutcome::NotAtLoginScreen => MessageBox {
                 msgtype: "error".to_owned(),
                 title: "Sign in failed".to_owned(),
                 text: "The remote computer was not at the login screen, so the password was not entered."
                     .to_owned(),
                 link: "".to_owned(),
                 ..Default::default()
-            }
+            },
         };
         msg.set_message_box(res);
+        crate::diagnostics::log(
+            "os-login",
+            match outcome {
+                OsLoginOutcome::TypedUnlocked => "reported to client: signed in",
+                OsLoginOutcome::TypedStillLocked => "reported to client: password rejected",
+                OsLoginOutcome::NotAtLoginScreen => "reported to client: not at login screen",
+            },
+        );
         let _ = self.send(msg).await;
     }
 
