@@ -1885,6 +1885,14 @@ pub fn main_get_software_update_url() {
     crate::common::check_software_update();
 }
 
+/// One manually triggered update check; returns a JSON report the UI can show.
+///
+/// Blocks the worker thread until the request finishes, which is fine: the bridge runs it off the
+/// UI thread and the caller awaits the result.
+pub fn main_check_update_now() -> String {
+    crate::common::check_update_now()
+}
+
 /// Whether the desktop client is registered to start with the user session.
 pub fn main_get_start_on_boot() -> SyncReturn<bool> {
     SyncReturn(crate::platform::get_start_on_boot())

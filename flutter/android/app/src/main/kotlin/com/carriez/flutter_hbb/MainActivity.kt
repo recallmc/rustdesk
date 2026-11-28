@@ -29,9 +29,11 @@ import android.media.MediaFormat
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
+import android.provider.Settings
 import android.webkit.MimeTypeMap
 import android.util.DisplayMetrics
 import androidx.annotation.RequiresApi
+import androidx.core.content.FileProvider
 import org.json.JSONArray
 import org.json.JSONObject
 import com.hjq.permissions.XXPermissions
@@ -659,8 +661,52 @@ class MainActivity : FlutterFragmentActivity() {
                         }
                     }
                 }
-                GET_VALUE -> {
-                    if (call.arguments is String) {
+                INSTALL_APK -> {
+                    val path = call.arguments as? String
+                    val file = path?.let { canonicalAppScopedFile(it) }
+                    if (file == null || !file.isFile) {
+                        result.error("invalid_source", "The APK is outside app-scoped storage", null)
+                    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                        !packageManager.canRequestPackageInstalls()
+                    ) {
+                        // One-time consent: the user has to allow this app to install unknown apps.
+                        try {
+                            startActivity(
+                                Intent(
+                                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                    Uri.parse("package:$packageName")
+                                )
+                            )
+                        } catch (e: Exception) {
+                            Log.e(logTag, "Failed to open the install permission screen", e)
+                        }
+                        result.error(
+                            "install_permission",
+                            "Allow installing apps from this source",
+                            null
+                        )
+                    } else {
+                        try {
+                            val uri = FileProvider.getUriForFile(
+                                this@MainActivity,
+                                "$packageName.fileprovider",
+                                file
+                            )
+                            startActivity(
+                                Intent(Intent.ACTION_VIEW).apply {
+                                    setDataAndType(uri, "application/vnd.android.package-archive")
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                            )
+                            result.success(true)
+                        } catch (e: Exception) {
+                            Log.e(logTag, "Failed to start the package installer", e)
+                            result.error("install_failed", e.message, null)
+                        }
+                    }
+                }
+                GET_VALUE -> {                    if (call.arguments is String) {
                         if (call.arguments == KEY_IS_SUPPORT_VOICE_CALL) {
                             result.success(isSupportVoiceCall())
                         } else {

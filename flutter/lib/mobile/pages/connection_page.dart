@@ -11,8 +11,10 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
 
 import '../../common.dart';
+import '../../common/update_service.dart';
 import '../../common/widgets/peer_tab_page.dart';
 import '../../common/widgets/autocomplete.dart';
+import '../../common/widgets/update_dialog.dart';
 import '../../consts.dart';
 import '../../models/model.dart';
 import '../../models/platform_model.dart';
@@ -124,19 +126,11 @@ class _ConnectionPageState extends State<ConnectionPage> {
         ? const SizedBox(height: 0)
         : InkWell(
             onTap: () async {
-              // Prefer the APK built for this device's CPU. The release page lists one APK per
-              // architecture, and picking the wrong one fails with "app isn't compatible with
-              // your system" (INSTALL_FAILED_NO_MATCHING_ABIS, -113).
-              final url = _androidUpdateAssetUrl(updateUrl) ?? updateUrl;
-              // https://pub.dev/packages/url_launcher#configuration
-              // https://developer.android.com/training/package-visibility/use-cases#open-urls-custom-tabs
-              //
-              // `await launchUrl(Uri.parse(url))` can also run if skip
-              // 1. The following check
-              // 2. `<action android:name="android.support.customtabs.action.CustomTabsService" />` in AndroidManifest.xml
-              //
-              // But it is better to add the check.
-              await launchUrl(Uri.parse(url));
+              // Download inside the app: the dialog streams the APK for this device and hands it
+              // to the system installer, so a tap never leaves the app or asks which file to pick.
+              final result = await checkUpdateNow();
+              if (!mounted) return;
+              await showUpdateCheckDialog(context, result);
             },
             child: Container(
                 alignment: AlignmentDirectional.center,
@@ -146,37 +140,6 @@ class _ConnectionPageState extends State<ConnectionPage> {
                 child: Text(translate('Download new version'),
                     style: const TextStyle(
                         color: Colors.white, fontWeight: FontWeight.bold))));
-  }
-
-  /// The APK asset of [releasePageUrl] that matches this device, or null when it cannot be known.
-  ///
-  /// `https://host/<owner>/<repo>/releases/tag/<tag>` becomes
-  /// `https://host/<owner>/<repo>/releases/download/<tag>/rustdesk-<version>-<arch>-signed.apk`,
-  /// the name the release workflow publishes.
-  String? _androidUpdateAssetUrl(String releasePageUrl) {
-    if (!isAndroid) return null;
-    final uri = Uri.tryParse(releasePageUrl);
-    if (uri == null) return null;
-    final segments = uri.pathSegments;
-    if (segments.length < 2 || segments[segments.length - 2] != 'tag') return null;
-    final tag = segments.last;
-    if (tag.isEmpty) return null;
-    final version = tag.startsWith('v') ? tag.substring(1) : tag;
-    // The release names its APKs after the Rust target architecture, so ask the build itself
-    // instead of mapping a Dart-side ABI name.
-    final arch = switch (bind.mainGetTargetArch()) {
-      'aarch64' => 'aarch64',
-      'arm' => 'armv7',
-      'x86_64' => 'x86_64',
-      _ => null,
-    };
-    if (arch == null) return null;
-    final downloadUri = uri.replace(pathSegments: [
-      ...segments.sublist(0, segments.length - 2),
-      'download',
-      tag,
-    ]);
-    return '$downloadUri/rustdesk-$version-$arch-signed.apk';
   }
 
   /// UI for the remote ID TextField.

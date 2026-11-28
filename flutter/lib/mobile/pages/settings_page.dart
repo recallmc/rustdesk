@@ -13,8 +13,10 @@ import 'package:url_launcher/url_launcher_string.dart';
 
 import '../../common.dart';
 import '../../common/biometric_gate.dart';
+import '../../common/update_service.dart';
 import '../../common/widgets/dialog.dart';
 import '../../common/widgets/login.dart';
+import '../../common/widgets/update_dialog.dart';
 import '../../consts.dart';
 import '../../models/model.dart';
 import '../../models/platform_model.dart';
@@ -94,6 +96,9 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   var _fingerprint = "";
   var _buildDate = "";
   var _myId = "";
+  /// Result line of the manual update check, shown under the tile.
+  String? _updateStatus;
+  bool _checkingUpdate = false;
   var _autoDisconnectTimeout = "";
   var _hideServer = false;
   var _hideProxy = false;
@@ -288,6 +293,28 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     } else {
       return false;
     }
+  }
+
+  /// Manual update check: shows the state here and opens the result dialog.
+  Future<void> _checkForUpdates(BuildContext context) async {
+    setState(() {
+      _checkingUpdate = true;
+      _updateStatus = translate('Checking...');
+    });
+    final result = await checkUpdateNow();
+    if (!mounted) return;
+    setState(() {
+      _checkingUpdate = false;
+      _updateStatus = switch (result.status) {
+        UpdateCheckStatus.upToDate =>
+          '${translate('Up to date')} (${result.currentVersion})',
+        UpdateCheckStatus.updateAvailable =>
+          '${translate('New version')} ${result.latestVersion}',
+        UpdateCheckStatus.failed => translate('Update check failed'),
+      };
+    });
+    if (!mounted) return;
+    await showUpdateCheckDialog(context, result);
   }
 
   @override
@@ -1122,6 +1149,18 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
                       )),
                 ),
                 leading: Icon(Icons.info)),
+            SettingsTile(
+                onPressed: _checkingUpdate ? null : (context) => _checkForUpdates(context),
+                title: Text(translate('Check for updates')),
+                description: _updateStatus == null ? null : Text(_updateStatus!),
+                trailing: _checkingUpdate
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : null,
+                leading: Icon(Icons.system_update)),
             SettingsTile(
                 title: Text(translate("Build Date")),
                 value: Padding(
