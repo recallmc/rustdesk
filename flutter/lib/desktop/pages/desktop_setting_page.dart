@@ -27,6 +27,8 @@ import 'package:url_launcher/url_launcher_string.dart';
 
 import '../../common/widgets/dialog.dart';
 import '../../common/widgets/login.dart';
+import '../../common/update_service.dart';
+import '../widgets/update_progress.dart';
 
 const double _kTabWidth = 200;
 const double _kTabHeight = 42;
@@ -2605,6 +2607,72 @@ class _About extends StatefulWidget {
 }
 
 class _AboutState extends State<_About> {
+  String? _updateStatus;
+  bool _checkingUpdate = false;
+  UpdateCheckResult? _lastCheck;
+
+  /// Manual update check. A found update goes through the existing desktop flow
+  /// (`handleUpdate`), which downloads and installs it; nothing about that flow changes here.
+  Future<void> _checkForUpdates() async {
+    setState(() {
+      _checkingUpdate = true;
+      _updateStatus = translate('Checking...');
+    });
+    final result = await checkUpdateNow();
+    if (!mounted) return;
+    setState(() {
+      _checkingUpdate = false;
+      _lastCheck = result;
+      _updateStatus = switch (result.status) {
+        UpdateCheckStatus.upToDate =>
+          '${translate('Up to date')} (${result.currentVersion})',
+        UpdateCheckStatus.updateAvailable =>
+          '${translate('New version')} ${result.latestVersion}',
+        UpdateCheckStatus.failed =>
+          '${translate('Update check failed')}: ${result.error}',
+      };
+    });
+    if (result.status == UpdateCheckStatus.updateAvailable) {
+      // Makes the existing home-page update card appear, and keeps the download source in one
+      // place for the updater below.
+      stateGlobal.updateUrl.value = result.url;
+    }
+  }
+
+  /// Manual check row: state on the left of the button, action on the right.
+  Widget _buildUpdateCheckRow() {
+    final result = _lastCheck;
+    final hasUpdate = result?.status == UpdateCheckStatus.updateAvailable;
+    // Only Windows and macOS have the in-app updater; elsewhere offer the release page.
+    final canInstall = isWindows || isMacOS;
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(Icons.system_update, color: _accentColor),
+      title: Text(
+        translate('Check for updates'),
+        style: TextStyle(fontSize: _kContentFontSize),
+      ),
+      subtitle: _updateStatus == null ? null : Text(_updateStatus!),
+      trailing: _checkingUpdate
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : TextButton(
+              onPressed: hasUpdate
+                  ? () => canInstall
+                      ? handleUpdate(result!.url)
+                      : launchUrlString(result!.url)
+                  : _checkForUpdates,
+              child: Text(
+                translate(
+                    hasUpdate ? (canInstall ? 'Update' : 'Download') : 'Check'),
+              ),
+            ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return futureBuilder(future: () async {
@@ -2650,6 +2718,7 @@ class _AboutState extends State<_About> {
               SelectionArea(
                   child: Text('${translate('ID')}: $myId')
                       .marginSymmetric(vertical: 4.0)),
+              _buildUpdateCheckRow(),
               InkWell(
                   onTap: () {
                     launchUrlString('https://rustdesk.com/privacy.html');

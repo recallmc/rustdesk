@@ -1247,6 +1247,51 @@ pub async fn do_check_software_update() -> hbb_common::ResultType<()> {
     result
 }
 
+/// One manually triggered update check, reported as JSON so the bridge needs no new type.
+///
+/// Keys: `status` (`update_available` | `up_to_date` | `failed`), `current_version`,
+/// `latest_version`, `url` (release page, empty unless an update is available) and `error`.
+///
+/// Unlike the startup check this ignores the "check for updates" option: the user asked for a
+/// result, so a disabled auto check must not turn into a silent no-op.
+#[tokio::main(flavor = "current_thread")]
+pub async fn check_update_now() -> String {
+    let report = |status: &str, latest: String, url: String, error: String| {
+        serde_json::json!({
+            "status": status,
+            "current_version": crate::VERSION,
+            "latest_version": latest,
+            "url": url,
+            "error": error,
+        })
+        .to_string()
+    };
+    if is_custom_client() {
+        return report(
+            "failed",
+            String::new(),
+            String::new(),
+            "Update check is disabled for custom clients.".to_owned(),
+        );
+    }
+    let release_id = match fetch_latest_release_tag().await {
+        Ok(release_id) => release_id,
+        Err(err) => return report("failed", String::new(), String::new(), err.to_string()),
+    };
+    let latest = match display_version_from_release_id(&release_id) {
+        Ok(latest) => latest,
+        Err(err) => return report("failed", String::new(), String::new(), err.to_string()),
+    };
+    let url = update_release_page_url(&release_id);
+    if get_version_number(&latest) > get_version_number(crate::VERSION) {
+        *SOFTWARE_UPDATE_URL.lock().unwrap() = url.clone();
+        report("update_available", latest, url, String::new())
+    } else {
+        clear_software_update_url();
+        report("up_to_date", latest, url, String::new())
+    }
+}
+
 async fn fetch_latest_release_tag() -> ResultType<String> {
     let url = update_releases_api_url();
     let proxy_conf = Config::get_socks();

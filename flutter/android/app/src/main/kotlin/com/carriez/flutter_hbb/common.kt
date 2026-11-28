@@ -59,6 +59,8 @@ const val PICK_IMPORT_DIRECTORY = "pick_import_directory"
 const val IMPORT_DIRECTORY = "import_directory"
 const val EXPORT_FILES = "export_files"
 const val GET_VALUE = "get_value"
+/// In-app updater: hand a downloaded APK to the system package installer.
+const val INSTALL_APK = "install_apk"
 
 const val KEY_IS_SUPPORT_VOICE_CALL = "KEY_IS_SUPPORT_VOICE_CALL"
 
